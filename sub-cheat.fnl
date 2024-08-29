@@ -1,67 +1,85 @@
-;; mpv-sub-cheat
-;;
-;; Target: Fennel 1.5.0
-;;-----------------------------------------------------------------------------
+;;;; mpv-sub-cheat
+;;;;
+;;;;   Hold a key to peek at the three most recent subtitles. Made with language
+;;;;   learning in mind.
+;;;;
+;;;;   Target: Fennel 1.5.1
 
-;; OPTIONS
+;;; --- OPTIONS ----------------------------------------------------------------
 
+(local script-name           :mpv-sub-cheat)
 (local script-options-prefix :sub-cheat)
+(local cheat-lines-capacity  3)
+(local ass-line-break        "\\N")
+(local dot-separator-pattern "[^%.]+")
 
-;; Defaults. Can be overriden like so:
-;;   `--script-opts=sub-cheat-margin-bottom=3,sub-cheat-style="\fs30\1a&H55&"`
-;; For style codes see https://aegisub.org/docs/latest/ass_tags/
+;;; Defaults. Can be overriden like so:
+;;;   `--script-opts=sub-cheat-margin-bottom=3,sub-cheat-style="\fs30\1a&H55&"`
+;;; For style codes consult https://aegisub.org/docs/latest/ass_tags/
 (local options {
-  :margin-bottom 9 ;; (text lines)
-  :lifetime 8 ;; (seconds)
-  ;; Ignore subtitles containing the following codes (dot-separated)
+  :enabled "no"
+  :margin-bottom 9 ; (text lines)
+  :lifetime 8 ; (seconds)
+
+  ;; [DOES NOT WORK YET]
+  ;; Ignore subtitles containing the following codes (dot-separated).
+  ;; The value is converted into an array of full-codes at startup
   :ass-filter "move.fr.kf.fad.k"
-  :style "\\an2\\fs36\\bord1.5\\shad1\\be2\\1c&HFFFFFF&" ;; Base style
+
+  :style "\\an2\\fs38\\bord1.5\\shad1\\be2\\1c&HFFFFFF&" ; Base style
   ;; NOTE: The styles also apply to all the following lines unless overridden
-  :style-1 "\\3c&H333333&\\4c&H333333&\\1a&H77&" ;; Style for line 1 (top)
-  :style-2 "\\bord1.5\\3c&H663399&\\4c&H000000&\\1a&H00&" ;; ... line 2 (mid)
-  :style-3 "\\3c&H663300&" ;; ... line 3 (bottom)
+  :style-1 "\\3c&H333333&\\4c&H333333&\\1a&H77&" ; Style for line 1 (top)
+  :style-2 "\\bord1.5\\3c&H993366&\\4c&H000000&\\1a&H00&" ; ... line 2 (mid)
+  :style-3 "\\3c&H1166CC&" ; ... line 3 (bottom)
 })
 
-;; STATE
+;;; --- META STATE -------------------------------------------------------------
 
-(var fallback-sid nil)
-(var fallback-ass-overlay nil)
-(var fallback-lines [])
-(var fallback-lines-expire-timers [])
+(var enabled?   false) ; Whether the user wants us to be working
+(var activated? false) ; Whether we're actually working
+;; (true, false) obtains when e.g. the user presses the 'enable' binding but
+;; there are no subtitles loaded
+
+;;; --- PER-ACTIVATION STATE ---------------------------------------------------
+
+(var cheat-sid                 nil)   ; 1 or 2
+(var cheat-ass-overlay         nil)   ; <- (mp.create_osd_overlay :ass-events)
+(var cheat-lines               [])    ; Array of 0-cap. strings, earliest first
+(var cheat-lines-expire-timers [])    ; <- (mp.add_timeout ...)
 (var subs-we-revealed-primary? false)
 (fn state-clear []
-  (set fallback-sid nil)
-  (set fallback-ass-overlay nil)
-  (set fallback-lines [])
-  (set fallback-lines-expire-timers [])
+  (set cheat-sid                 nil)
+  (set cheat-ass-overlay         nil)
+  (set cheat-lines               [])
+  (set cheat-lines-expire-timers [])
   (set subs-we-revealed-primary? true))
 
-;; A failed macro version: the names inside the `state-clear` fn are mangled and
-;; don't match the outer names
-;;
-;;(macro define-state [state-map]
-;;  (let [names []
-;;        vals []
-;;        clear-body []]
-;;    (each [k v (pairs state-map)]
-;;      (table.insert names (sym k))
-;;      (table.insert vals v))
-;;
-;;    (table.insert vals
-;;      `(fn []
-;;        (set ,(list (unpack names)) (values ,(unpack vals)))))
-;;    (table.insert names (sym :state-clear))
-;;
-;;    `(var ,(list (unpack names)) (values ,(unpack vals)))))
-;;(define-state {
-;;  :fallback-sid nil
-;;  :fallback-ass-overlay nil
-;;  :fallback-lines []
-;;  :fallback-lines-expire-timers []
-;;  :subs-we-revealed-primary? false
-;;})
+;;; A failed macro version of the above: the names inside the `state-clear` fn
+;;; are mangled and don't match the outer names
+;;;
+;;;   (macro define-state [state-map]
+;;;     (let [names []
+;;;           vals []
+;;;           clear-body []]
+;;;       (each [k v (pairs state-map)]
+;;;         (table.insert names (sym k))
+;;;         (table.insert vals v))
+;;;
+;;;       (table.insert vals
+;;;         `(fn []
+;;;           (set ,(list (unpack names)) (values ,(unpack vals)))))
+;;;       (table.insert names (sym :state-clear))
+;;;
+;;;       `(var ,(list (unpack names)) (values ,(unpack vals)))))
+;;;   (define-state {
+;;;     :cheat-sid nil
+;;;     :cheat-ass-overlay nil
+;;;     :cheat-lines []
+;;;     :cheat-lines-expire-timers []
+;;;     :subs-we-revealed-primary? false
+;;;   })
 
-;; GENERAL UTILITIES
+;;; --- GENERAL UTILITIES ------------------------------------------------------
 
 (fn string-and-non-empty? [s]
   (and (not= s nil) (not= s "")))
@@ -77,10 +95,14 @@
   (icollect [_ v (ipairs arr)]
     (f v)))
 
-;; SUB UTILITIES
+;;; --- SUB UTILITIES ----------------------------------------------------------
 
 (fn sub-track-property [sub-track property-base]
-  (.. (if (= sub-track 2) :secondary- "") property-base))
+  (let [prefix (if (= sub-track 2) :secondary- "")]
+    (.. prefix property-base)))
+
+(fn cheat-sub-property [property-base]
+  (sub-track-property cheat-sid property-base))
 
 (fn has-special-ass-code? [s]
   (var found false)
@@ -89,171 +111,217 @@
       (set found true)))
   found)
 
-;; CORE LOGIC
+(fn append-ass-line-break [s]
+  (.. s ass-line-break))
 
-(fn fallback-text-showing? []
-  "Whether the fallback subtitle overlay is showing (this can be true even if
-  it's empty)"
-  (and fallback-ass-overlay (not fallback-ass-overlay.hidden)))
+;;; --- SUB LOGIC --------------------------------------------------------------
 
-(fn fallback-text-empty? []
-  (or (not fallback-ass-overlay) (= fallback-ass-overlay.data "")))
+(fn cheat-text-showing? []
+  "Whether the cheat subtitle overlay is showing (this can be true even if
+  it's empty and therefore not visible)"
+  (and cheat-ass-overlay (not cheat-ass-overlay.hidden)))
 
-(fn fallback-text-show []
-  (let [num-lines (length fallback-lines)
-        data (if (= num-lines 0)
-               ""
-               (let [lines-with-nl (map #(.. (. $1 :text) "\\N") fallback-lines)
-                     padded-lines  (array-pad-left lines-with-nl 3 "")
-                     margin        (string.rep "\\N" options.margin-bottom)
-                     data*         (string.format
-                                     "{%s%s}%s{%s}%s{%s}%s%s"
-                                     options.style
-                                     options.style-1 (. padded-lines 1)
-                                     options.style-2 (. padded-lines 2)
-                                     options.style-3 (. padded-lines 3)
-                                     margin)]
-                 data*))]
-    (doto fallback-ass-overlay
-      (tset :data data)
-      ;; We don't hide it even when it's empty to make other logic simpler
-      (tset :hidden false)
-      (: :update))))
+(fn cheat-text-empty? []
+  (or (not cheat-ass-overlay) (= cheat-ass-overlay.data "")))
 
-(fn fallback-text-hide []
-  (doto fallback-ass-overlay
+(fn make-cheat-ass-overlay-data []
+  (let [num-lines (length cheat-lines)]
+    (if (= num-lines 0)
+      ""
+      (let [lines-with-nl (map #(append-ass-line-break $.text) cheat-lines)
+            padded-lines (array-pad-left lines-with-nl cheat-lines-capacity "")
+            margin (string.rep ass-line-break options.margin-bottom)]
+        (string.format
+           "{%s%s}%s{%s}%s{%s}%s%s"
+           options.style
+           options.style-1 (. padded-lines 1)
+           options.style-2 (. padded-lines 2)
+           options.style-3 (. padded-lines 3)
+           margin)))))
+
+(fn cheat-text-show []
+  (doto cheat-ass-overlay
+    (tset :data (make-cheat-ass-overlay-data))
+    ;; We don't hide it even when it's empty to make other logic simpler
+    (tset :hidden false)
+    (: :update)))
+
+(fn cheat-text-hide []
+  (doto cheat-ass-overlay
     (tset :hidden true)
     (: :update)))
 
 (fn subs-reveal []
-  (fallback-text-show)
+  (cheat-text-show)
   (when (and
-          (= fallback-sid 2)
+          (= cheat-sid 2)
           (= (mp.get_property :sub-visibility) :no))
     (mp.set_property :sub-visibility :yes)
     (set subs-we-revealed-primary? true)))
 
 (fn subs-hide []
-  (fallback-text-hide)
+  (cheat-text-hide)
   (when subs-we-revealed-primary?
     (mp.set_property :sub-visibility :no)
     (set subs-we-revealed-primary? false)))
 
-(fn fallback-lines-expire-timers-remove [timer]
-  (for [i 1 (length fallback-lines-expire-timers)]
-    (let [i-timer (. fallback-lines-expire-timers i)]
+(fn cheat-lines-expire-timers-remove [timer]
+  (for [i 1 (length cheat-lines-expire-timers)]
+    (let [i-timer (. cheat-lines-expire-timers i)]
       (when (= i-timer timer)
-        (table.remove fallback-lines-expire-timers i)
+        (table.remove cheat-lines-expire-timers i)
         (lua :break)))))
 
-(fn fallback-lines-expire [timer target-hash]
-  (fallback-lines-expire-timers-remove timer)
-  (for [i 1 (length fallback-lines)]
-    (let [i-hash (-> fallback-lines (. i) (. :hash))]
+(fn cheat-lines-expire [timer target-hash]
+  (cheat-lines-expire-timers-remove timer)
+  (for [i 1 (length cheat-lines)]
+    (let [i-hash (-> cheat-lines (. i) (. :hash))]
       (when (= i-hash target-hash)
-        (table.remove fallback-lines i)
-        (when (and fallback-text-showing? (not fallback-text-empty?))
-          (fallback-text-show))
+        (table.remove cheat-lines i)
+        (when (and cheat-text-showing? (not cheat-text-empty?))
+          (cheat-text-show))
         (lua :break)))))
 
-(fn fallback-lines-add [sub-text]
+(fn cheat-lines-add [sub-text]
   ;; Using a string representation of time to avoid surprises
-  (let [time       (mp.get_property :time-pos/full)
-        first-char (sub-text:sub 1 1)
-        poor-hash  (.. time (length sub-text) first-char)]
-    (table.insert fallback-lines {:hash poor-hash :text sub-text})
-    ;; Keep `fallback-lines` size capped to 3
-    (when (> (length fallback-lines) 3)
-      (table.remove fallback-lines 1))
-    ;; Schedule line expiration. Keep the timer around to pause it if
+  (let [sub-text*  (sub-text:gsub "\n" ass-line-break)
+        time       (mp.get_property :time-pos/full)
+        first-char (sub-text*:sub 1 1)
+        poor-hash  (.. time (length sub-text*) first-char)]
+    (table.insert cheat-lines {:hash poor-hash :text sub-text*})
+    ;; Keep `cheat-lines` size capped
+    (when (> (length cheat-lines) cheat-lines-capacity)
+      (table.remove cheat-lines 1))
+    ;; Schedule line expiration. Keep the timer around to pause it when
     ;; the playback is paused
     (let [timer (mp.add_timeout
                   options.lifetime
-                  #(fallback-lines-expire timer poor-hash))]
-      (table.insert fallback-lines-expire-timers timer))))
+                  #(cheat-lines-expire timer poor-hash))]
+      (table.insert cheat-lines-expire-timers timer))))
 
-(fn fallback-lines-clear []
-  (set fallback-lines []))
+(fn cheat-lines-clear []
+  (set cheat-lines []))
 
-;; EVENT HANDLERS
+;;; --- EVENT HANDLERS ---------------------------------------------------------
 
-(fn handle-subs-reveal-key-event [event-info]
-  (match event-info.event
-    :down (subs-reveal)
-    :up   (subs-hide)))
-
-(fn handle-fallback-sub-text [_ sub-text]
+(fn handle-cheat-sub-text [_ sub-text]
   (when (string-and-non-empty? sub-text)
-    ;; TODO: No `secondary-sub-text-ass` on current mpv ver. so the filtering
-    ;;       is pointless if `fallback-sid` is 2. v0.39 might have
-    ;;       `secondary-sub-text/ass`?
-    (let [ass (mp.get_property (sub-track-property fallback-sid :sub-text-ass))]
-      (when (or (not ass) (not (has-special-ass-code? ass))) ;; Skip signs etc.
-        (-> sub-text
-          (: :gsub "\n" "\\N") ;; Breaks display formatting otherwise
-          (fallback-lines-add))
-        ;; If text is showing, update to show the new line too
-        (when (fallback-text-showing?)
-          (subs-reveal))))))
+    ;; Re-enable filtering on v0.39 once we're be able to use
+    ;; `secondary-sub-text/ass` (v0.38 only has `sub-text-ass`).
+    ;;
+    ;;  (let [ass (mp.get_property (cheat-sub-property "sub-text/ass"))]
+    ;;    (when (or (not ass) (not (has-special-ass-code? ass))) ; Skip signs+
+    (cheat-lines-add sub-text)
+    ;; If text is showing, update to show the new line too
+    (when (cheat-text-showing?)
+      (subs-reveal))))
 
 (fn handle-seeking []
-  (when (fallback-text-showing?)
-    (fallback-text-hide))
-  (fallback-lines-clear)
-  (when fallback-ass-overlay
-    (fallback-ass-overlay:update)))
+  (when (cheat-text-showing?)
+    (cheat-text-hide))
+  (cheat-lines-clear)
+  (when cheat-ass-overlay
+    (cheat-ass-overlay:update)))
 
 (fn handle-pause [_ paused?]
-  ;; Pressing a pause key while the fallback reveal key is being held causes
-  ;; a fake depress event for the latter (why?), causing the fallback text to
-  ;; disappear. Which is why we re-show it here when pause is activated
-  (when fallback-ass-overlay
+  ;; Pressing a pause key while the peek key is being held causes a fake depress
+  ;; event for the latter (why?), causing the cheat text to disappear. Which
+  ;; is why we re-show it here when pause is activated.
+  ;;
+  ;; This still leaves the problem of the text blinking, but it's probably best
+  ;; we can do short of remapping the pause key. In case we wanted to do that,
+  ;; here's the starting point:
+  ;;   (let [all-keybindings (mp.get_property_native :input-bindings)]
+  ;;     (each [_ binding (ipairs all-keybindings)]
+  ;;       (when (= binding.cmd "cycle pause")
+  ;;         (print binding.key))))
+  (when cheat-ass-overlay
     (if paused?
-      (fallback-text-show)
-      (fallback-text-hide)))
-  ;; Pause expire timers so that fallback subtitles don't disappear during pause
-  (each [_ timer (ipairs fallback-lines-expire-timers)]
+      (subs-reveal)
+      (subs-hide)))
+  ;; Stop the expire timers during pause
+  (each [_ timer (ipairs cheat-lines-expire-timers)]
     (if paused?
       (timer:stop)
       (timer:resume))))
 
 (fn activate []
+  (mp.observe_property :seeking :bool handle-seeking)
+  (mp.observe_property :pause :bool handle-pause)
   (let [sid-secondary (mp.get_property :current-tracks/sub2/id)]
-    (set fallback-sid (if sid-secondary 2 1)))
-  (mp.set_property_bool
-    (sub-track-property fallback-sid :sub-visibility)
-    false)
-  (doto fallback-ass-overlay
+    (set cheat-sid (if sid-secondary 2 1)))
+  (mp.set_property_bool (cheat-sub-property :sub-visibility) false)
+  (doto cheat-ass-overlay
     (set (mp.create_osd_overlay :ass-events))
     (tset :hidden true))
   (mp.observe_property
-    (sub-track-property fallback-sid :sub-text)
+    (cheat-sub-property :sub-text)
     :string
-    handle-fallback-sub-text))
+    handle-cheat-sub-text)
+  (set activated? true))
 
-(fn handle-sub-track-change [_ sid-primary]
+(fn deactivate []
+  (mp.unobserve_property handle-seeking)
+  (mp.unobserve_property handle-pause)
+  (mp.unobserve_property handle-cheat-sub-text)
+  (mp.set_property (cheat-sub-property :sub-visibility) :yes)
+  (set activated? false))
+
+(fn handle-sub-track [_ sid-primary]
   (state-clear)
-  ;; TODO: Deactivate otherwise?
-  (when sid-primary
-    (activate)))
+  (if sid-primary
+    (when (and enabled? (not activated?))
+      (activate))
+    (do
+      (deactivate)
+      (when enabled?
+        (mp.osd_message (.. script-name ": No subtitle tracks selected"))))))
 
-;; MAIN
+(fn enable []
+  (mp.observe_property :current-tracks/sub/id :number handle-sub-track)
+  (set enabled? true))
 
-((. (require :mp.options) :read_options) options script-options-prefix)
+(fn disable []
+  (mp.unobserve_property handle-sub-track)
+  (when activated?
+    (deactivate))
+  (set enabled? false))
 
-;; Convert the `ass-filter` option value to a more convenient format
+(fn handle-sub-cheat-toggle-enabled-pressed []
+  (if enabled? (disable) (enable))
+  (let [state (if enabled? :ON :OFF)
+        msg (.. script-name " " state)]
+    (mp.osd_message msg 5)))
+
+(fn handle-subs-peek-key-event [event-info]
+  (when activated?
+    (match event-info.event
+      :down (subs-reveal)
+      :up   (subs-hide))))
+
+;;; --- PROCESS OPTIONS --------------------------------------------------------
+
+(let [opt (require :mp.options)]
+  (opt.read_options options script-options-prefix))
+
+;;; Convert the `ass-filter` option value to a more convenient format
 (tset options :ass-filter
-  (icollect [identifier (options.ass-filter:gmatch "[^%.]+")]
+  (icollect [identifier (options.ass-filter:gmatch dot-separator-pattern)]
     (.. "\\" identifier)))
 
-(mp.observe_property :current-tracks/sub/id :number handle-sub-track-change)
-(mp.observe_property :seeking :bool handle-seeking)
-(mp.observe_property :pause :bool handle-pause)
+;;; --- MAIN -------------------------------------------------------------------
 
 (mp.add_key_binding
   nil
-  :peek-cheat-subs
-  handle-subs-reveal-key-event
+  :sub-cheat-toggle-enabled
+  handle-sub-cheat-toggle-enabled-pressed)
+(mp.add_key_binding
+  nil
+  :sub-cheat-peek
+  handle-subs-peek-key-event
   {:complex true})
+
+(when (= options.enabled :yes)
+  (enable))
 
 nil
