@@ -41,13 +41,13 @@
 
 ;;; --- PER-ACTIVATION STATE ---------------------------------------------------
 
-(var cheat-sid                 nil)   ; 1 or 2
+(var cheat-track               nil)   ; 1/2 for primary/secondary
 (var cheat-ass-overlay         nil)   ; <- (mp.create_osd_overlay :ass-events)
 (var cheat-lines               [])    ; Array of 0-cap. strings, earliest first
 (var cheat-lines-expire-timers [])    ; <- (mp.add_timeout ...)
 (var subs-we-revealed-primary? false)
 (fn state-clear []
-  (set cheat-sid                 nil)
+  (set cheat-track               nil)
   (set cheat-ass-overlay         nil)
   (set cheat-lines               [])
   (set cheat-lines-expire-timers [])
@@ -71,7 +71,7 @@
 ;;;
 ;;;       `(var ,(list (unpack names)) (values ,(unpack vals)))))
 ;;;   (define-state {
-;;;     :cheat-sid nil
+;;;     :cheat-track nil
 ;;;     :cheat-ass-overlay nil
 ;;;     :cheat-lines []
 ;;;     :cheat-lines-expire-timers []
@@ -101,7 +101,7 @@
     (.. prefix property-base)))
 
 (fn cheat-sub-property [property-base]
-  (sub-track-property cheat-sid property-base))
+  (sub-track-property cheat-track property-base))
 
 (fn has-special-ass-code? [s]
   (var found false)
@@ -128,8 +128,8 @@
     (if (= num-lines 0)
       ""
       (let [lines-with-nl (map #(append-ass-line-break $.text) cheat-lines)
-            padded-lines (array-pad-left lines-with-nl cheat-lines-capacity "")
-            margin (string.rep ass-line-break options.margin-bottom)]
+            padded-lines  (array-pad-left lines-with-nl cheat-lines-capacity "")
+            margin        (string.rep ass-line-break options.margin-bottom)]
         (string.format
            "{%s%s}%s{%s}%s{%s}%s%s"
            options.style
@@ -153,7 +153,7 @@
 (fn subs-reveal []
   (cheat-text-show)
   (when (and
-          (= cheat-sid 2)
+          (= cheat-track 2)
           (= (mp.get_property :sub-visibility) :no))
     (mp.set_property :sub-visibility :yes)
     (set subs-we-revealed-primary? true)))
@@ -201,9 +201,9 @@
 (fn cheat-lines-clear []
   (set cheat-lines []))
 
-(fn sync-cheat-sid []
+(fn sync-cheat-track []
   (let [sid-secondary (mp.get_property :current-tracks/sub2/id)]
-    (set cheat-sid (if sid-secondary 2 1)))
+    (set cheat-track (if sid-secondary 2 1)))
   (mp.set_property_bool (cheat-sub-property :sub-visibility) false)
   (cheat-lines-clear))
 
@@ -253,7 +253,7 @@
 (fn activate []
   (mp.observe_property :seeking :bool handle-seeking)
   (mp.observe_property :pause :bool handle-pause)
-  (sync-cheat-sid)
+  (sync-cheat-track)
   (doto cheat-ass-overlay
     (set (mp.create_osd_overlay :ass-events))
     (tset :hidden true))
@@ -272,7 +272,7 @@
 
 (fn handle-sub-track [_ sid-primary]
   (case [sid-primary activated?]
-    [sid true ] (sync-cheat-sid)
+    [sid true ] (sync-cheat-track)
     [sid false] (activate)
     [_   true ] (deactivate)
     [_   false] (mp.osd_message

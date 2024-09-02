@@ -6,13 +6,13 @@ local dot_separator_pattern = "[^%.]+"
 local options = {enabled = "no", ["margin-bottom"] = 9, lifetime = 8, ["ass-filter"] = "move.fr.kf.fad.k", style = "\\an2\\fs38\\bord1.5\\shad1\\be2\\1c&HFFFFFF&", ["style-1"] = "\\3c&H333333&\\4c&H333333&\\1a&H77&", ["style-2"] = "\\bord1.5\\3c&H993366&\\4c&H000000&\\1a&H00&", ["style-3"] = "\\3c&H1166CC&"}
 local enabled_3f = false
 local activated_3f = false
-local cheat_sid = nil
+local cheat_track = nil
 local cheat_ass_overlay = nil
 local cheat_lines = {}
 local cheat_lines_expire_timers = {}
 local subs_we_revealed_primary_3f = false
 local function state_clear()
-  cheat_sid = nil
+  cheat_track = nil
   cheat_ass_overlay = nil
   cheat_lines = {}
   cheat_lines_expire_timers = {}
@@ -53,7 +53,7 @@ local function sub_track_property(sub_track, property_base)
   return (prefix .. property_base)
 end
 local function cheat_sub_property(property_base)
-  return sub_track_property(cheat_sid, property_base)
+  return sub_track_property(cheat_track, property_base)
 end
 local function has_special_ass_code_3f(s)
   local found = false
@@ -103,7 +103,7 @@ local function cheat_text_hide()
 end
 local function subs_reveal()
   cheat_text_show()
-  if ((cheat_sid == 2) and (mp.get_property("sub-visibility") == "no")) then
+  if ((cheat_track == 2) and (mp.get_property("sub-visibility") == "no")) then
     mp.set_property("sub-visibility", "yes")
     subs_we_revealed_primary_3f = true
     return nil
@@ -169,13 +169,13 @@ local function cheat_lines_clear()
   cheat_lines = {}
   return nil
 end
-local function sync_cheat_sid()
+local function sync_cheat_track()
   do
     local sid_secondary = mp.get_property("current-tracks/sub2/id")
     if sid_secondary then
-      cheat_sid = 2
+      cheat_track = 2
     else
-      cheat_sid = 1
+      cheat_track = 1
     end
   end
   mp.set_property_bool(cheat_sub_property("sub-visibility"), false)
@@ -226,7 +226,7 @@ end
 local function activate()
   mp.observe_property("seeking", "bool", handle_seeking)
   mp.observe_property("pause", "bool", handle_pause)
-  sync_cheat_sid()
+  sync_cheat_track()
   do
     cheat_ass_overlay = mp.create_osd_overlay("ass-events")
     cheat_ass_overlay["hidden"] = true
@@ -247,7 +247,7 @@ local function handle_sub_track(_, sid_primary)
   local _21_, _22_ = sid_primary, activated_3f
   if ((nil ~= _21_) and (_22_ == true)) then
     local sid = _21_
-    return sync_cheat_sid()
+    return sync_cheat_track()
   elseif ((nil ~= _21_) and (_22_ == false)) then
     local sid = _21_
     return activate()
