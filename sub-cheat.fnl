@@ -1,7 +1,6 @@
 ;;;; mpv-sub-cheat
 ;;;;
-;;;;   Hold a key to peek at the three most recent subtitles. Made with language
-;;;;   learning in mind.
+;;;;   Hold a key to peek at the three most recent subtitles.
 ;;;;
 ;;;;   Target: Fennel 1.5.1
 
@@ -17,7 +16,7 @@
 ;;;   `--script-opts=sub-cheat-margin-bottom=3,sub-cheat-style="\fs30\1a&H55&"`
 ;;; For style codes consult https://aegisub.org/docs/latest/ass_tags/
 (local options {
-  :enabled "no"
+  :enabled :no
   :margin-bottom 9 ; (text lines)
   :lifetime 8 ; (seconds)
 
@@ -202,6 +201,12 @@
 (fn cheat-lines-clear []
   (set cheat-lines []))
 
+(fn sync-cheat-sid []
+  (let [sid-secondary (mp.get_property :current-tracks/sub2/id)]
+    (set cheat-sid (if sid-secondary 2 1)))
+  (mp.set_property_bool (cheat-sub-property :sub-visibility) false)
+  (cheat-lines-clear))
+
 ;;; --- EVENT HANDLERS ---------------------------------------------------------
 
 (fn handle-cheat-sub-text [_ sub-text]
@@ -248,9 +253,7 @@
 (fn activate []
   (mp.observe_property :seeking :bool handle-seeking)
   (mp.observe_property :pause :bool handle-pause)
-  (let [sid-secondary (mp.get_property :current-tracks/sub2/id)]
-    (set cheat-sid (if sid-secondary 2 1)))
-  (mp.set_property_bool (cheat-sub-property :sub-visibility) false)
+  (sync-cheat-sid)
   (doto cheat-ass-overlay
     (set (mp.create_osd_overlay :ass-events))
     (tset :hidden true))
@@ -268,16 +271,15 @@
   (set activated? false))
 
 (fn handle-sub-track [_ sid-primary]
-  (state-clear)
-  (if sid-primary
-    (when (and enabled? (not activated?))
-      (activate))
-    (do
-      (deactivate)
-      (when enabled?
-        (mp.osd_message (.. script-name ": No subtitle tracks selected"))))))
+  (case [sid-primary activated?]
+    [sid true ] (sync-cheat-sid)
+    [sid false] (activate)
+    [_   true ] (deactivate)
+    [_   false] (mp.osd_message
+                  (.. script-name " ON but no subtitle tracks selected"))))
 
 (fn enable []
+  (state-clear)
   (mp.observe_property :current-tracks/sub/id :number handle-sub-track)
   (set enabled? true))
 

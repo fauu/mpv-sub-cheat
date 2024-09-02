@@ -169,6 +169,18 @@ local function cheat_lines_clear()
   cheat_lines = {}
   return nil
 end
+local function sync_cheat_sid()
+  do
+    local sid_secondary = mp.get_property("current-tracks/sub2/id")
+    if sid_secondary then
+      cheat_sid = 2
+    else
+      cheat_sid = 1
+    end
+  end
+  mp.set_property_bool(cheat_sub_property("sub-visibility"), false)
+  return cheat_lines_clear()
+end
 local function handle_cheat_sub_text(_, sub_text)
   if string_and_non_empty_3f(sub_text) then
     cheat_lines_add(sub_text)
@@ -214,15 +226,7 @@ end
 local function activate()
   mp.observe_property("seeking", "bool", handle_seeking)
   mp.observe_property("pause", "bool", handle_pause)
-  do
-    local sid_secondary = mp.get_property("current-tracks/sub2/id")
-    if sid_secondary then
-      cheat_sid = 2
-    else
-      cheat_sid = 1
-    end
-  end
-  mp.set_property_bool(cheat_sub_property("sub-visibility"), false)
+  sync_cheat_sid()
   do
     cheat_ass_overlay = mp.create_osd_overlay("ass-events")
     cheat_ass_overlay["hidden"] = true
@@ -240,23 +244,25 @@ local function deactivate()
   return nil
 end
 local function handle_sub_track(_, sid_primary)
-  state_clear()
-  if sid_primary then
-    if (enabled_3f and not activated_3f) then
-      return activate()
-    else
-      return nil
-    end
+  local _21_, _22_ = sid_primary, activated_3f
+  if ((nil ~= _21_) and (_22_ == true)) then
+    local sid = _21_
+    return sync_cheat_sid()
+  elseif ((nil ~= _21_) and (_22_ == false)) then
+    local sid = _21_
+    return activate()
+  elseif (true and (_22_ == true)) then
+    local _0 = _21_
+    return deactivate()
+  elseif (true and (_22_ == false)) then
+    local _0 = _21_
+    return mp.osd_message((script_name .. " ON but no subtitle tracks selected"))
   else
-    deactivate()
-    if enabled_3f then
-      return mp.osd_message((script_name .. ": No subtitle tracks selected"))
-    else
-      return nil
-    end
+    return nil
   end
 end
 local function enable()
+  state_clear()
   mp.observe_property("current-tracks/sub/id", "number", handle_sub_track)
   enabled_3f = true
   return nil
