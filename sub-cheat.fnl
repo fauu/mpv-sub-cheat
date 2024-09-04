@@ -131,12 +131,12 @@
             padded-lines  (array-pad-left lines-with-nl cheat-lines-capacity "")
             margin        (string.rep ass-line-break options.margin-bottom)]
         (string.format
-           "{%s%s}%s{%s}%s{%s}%s%s"
-           options.style
-           options.style-1 (. padded-lines 1)
-           options.style-2 (. padded-lines 2)
-           options.style-3 (. padded-lines 3)
-           margin)))))
+          "{%s%s}%s{%s}%s{%s}%s%s"
+          options.style
+          options.style-1 (. padded-lines 1)
+          options.style-2 (. padded-lines 2)
+          options.style-3 (. padded-lines 3)
+          margin)))))
 
 (fn cheat-text-show []
   (doto cheat-ass-overlay
