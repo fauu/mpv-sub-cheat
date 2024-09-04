@@ -240,22 +240,27 @@ local function deactivate()
   mp.unobserve_property(handle_pause)
   mp.unobserve_property(handle_cheat_sub_text)
   mp.set_property(cheat_sub_property("sub-visibility"), "yes")
+  if cheat_ass_overlay then
+    cheat_ass_overlay:remove()
+  else
+  end
+  state_clear()
   activated_3f = false
   return nil
 end
 local function handle_sub_track(_, sid_primary)
-  local _21_, _22_ = sid_primary, activated_3f
-  if ((nil ~= _21_) and (_22_ == true)) then
-    local sid = _21_
+  local _22_, _23_ = sid_primary, activated_3f
+  if ((nil ~= _22_) and (_23_ == true)) then
+    local sid = _22_
     return sync_cheat_track()
-  elseif ((nil ~= _21_) and (_22_ == false)) then
-    local sid = _21_
+  elseif ((nil ~= _22_) and (_23_ == false)) then
+    local sid = _22_
     return activate()
-  elseif (true and (_22_ == true)) then
-    local _0 = _21_
+  elseif (true and (_23_ == true)) then
+    local _0 = _22_
     return deactivate()
-  elseif (true and (_22_ == false)) then
-    local _0 = _21_
+  elseif (true and (_23_ == false)) then
+    local _0 = _22_
     return mp.osd_message((script_name .. " ON but no subtitle tracks selected"))
   else
     return nil
@@ -293,10 +298,10 @@ local function handle_sub_cheat_toggle_enabled_pressed()
 end
 local function handle_subs_peek_key_event(event_info)
   if activated_3f then
-    local _27_ = event_info.event
-    if (_27_ == "down") then
+    local _28_ = event_info.event
+    if (_28_ == "down") then
       return subs_reveal()
-    elseif (_27_ == "up") then
+    elseif (_28_ == "up") then
       return subs_hide()
     else
       return nil
@@ -309,7 +314,7 @@ do
   local opt = require("mp.options")
   opt.read_options(options, script_options_prefix)
 end
-local _30_
+local _31_
 do
   local tbl_21_auto = {}
   local i_22_auto = 0
@@ -321,9 +326,9 @@ do
     else
     end
   end
-  _30_ = tbl_21_auto
+  _31_ = tbl_21_auto
 end
-options["ass-filter"] = _30_
+options["ass-filter"] = _31_
 mp.add_key_binding(nil, "sub-cheat-toggle-enabled", handle_sub_cheat_toggle_enabled_pressed)
 mp.add_key_binding(nil, "sub-cheat-peek", handle_subs_peek_key_event, {complex = true})
 if (options.enabled == "yes") then

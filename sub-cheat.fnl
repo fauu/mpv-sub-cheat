@@ -268,6 +268,9 @@
   (mp.unobserve_property handle-pause)
   (mp.unobserve_property handle-cheat-sub-text)
   (mp.set_property (cheat-sub-property :sub-visibility) :yes)
+  (when cheat-ass-overlay
+    (cheat-ass-overlay:remove))
+  (state-clear)
   (set activated? false))
 
 (fn handle-sub-track [_ sid-primary]
